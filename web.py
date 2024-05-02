@@ -1,49 +1,73 @@
-import streamlit as st
+import io
 import pandas as pd
-import base64
-from io import BytesIO
-import openpyxl
+import ipywidgets as widgets
+from IPython.display import display, clear_output
 
+# Interface for file upload
+upload = widgets.FileUpload(accept='.csv, .xlsx', multiple=False)
+display(upload)
 
-# Function to generate download link for the DataFrame
-def to_excel(df):
-    output = BytesIO()
-    writer = pd.ExcelWriter(output, engine='openpyxl')
-    df.to_excel(writer, index=False, sheet_name='Sheet1')
-    writer.save()
-    processed_data = output.getvalue()
-    return processed_data
+# Global list to store both label and dropdown widgets
+widgets_pairs = []
 
-
-st.title('Pivot Table to Dropdown Application')
-
-# File uploader allows user to add their own CSV or Excel
-uploaded_file = st.file_uploader("Upload your pivot table file", type=["csv", "xlsx"])
-
-if uploaded_file is not None:
-    # Read and display the file
-    if uploaded_file.name.endswith('.csv'):
-        df = pd.read_csv(uploaded_file)
+def create_dropdowns_from_file(change):
+    global widgets_pairs
+    # Read the uploaded file into a DataFrame
+    uploaded_filename = next(iter(upload.value))
+    content = upload.value[uploaded_filename]['content']
+    if uploaded_filename.endswith('.csv'):
+        df = pd.read_csv(io.BytesIO(content))
     else:
-        df = pd.read_excel(uploaded_file)
+        df = pd.read_excel(io.BytesIO(content))
+
     df.set_index('Item', inplace=True)
-    st.write('Pivot Table:')
-    st.dataframe(df)
 
-    # Process the DataFrame to create dropdowns (a simplified example)
-    options = df.iloc[0, 1:].dropna().tolist()
-    selections = {}
-    for item in df['Item']:
-        selections[item] = st.selectbox(f'Select price for {item}', options)
+    # Clear previous output
+    clear_output()
+    display(upload)  # Redisplay the upload button
+    widgets_pairs.clear()  # Clear previous pairs
+    
+    # Create dropdowns for each item in the pivot table
+    item_widgets = []
+    for item in df.index:
+        matched_prices = df.loc[item].dropna().values
+        item_label = widgets.Label(value=f'{item}:', layout=widgets.Layout(width='40%'))
+        dropdown = widgets.Dropdown(
+            options=matched_prices,
+            description='',  # No description to avoid duplication
+            disabled=False,
+            layout=widgets.Layout(width='60%')
+        )
 
-    if st.button('Save Selections'):
-        # Save the selected options
-        selected_df = pd.DataFrame(list(selections.items()), columns=['Item', 'Selected_Price'])
-        st.write('Selected Prices:')
-        st.dataframe(selected_df)
+        # Store the label and dropdown together
+        widgets_pairs.append((item_label, dropdown))
+        
+        hbox = widgets.HBox([item_label, dropdown])
+        item_widgets.append(hbox)
 
-        # Generate a link to download the new DataFrame as Excel
-        val = to_excel(selected_df)
-        b64 = base64.b64encode(val)  # some strings <-> bytes conversions necessary here
-        href = f'<a href="data:application/octet-stream;base64,{b64.decode()}" download="selected_prices.xlsx">Download selected prices as Excel</a>'
-        st.markdown(href, unsafe_allow_html=True)
+    container = widgets.VBox(item_widgets)
+    display(container)
+    display(save_button)  # Display the save button
+
+upload.observe(create_dropdowns_from_file, names='value')
+
+def save_selections(button):
+    data = {'Item': [], 'Matched_Item_ReportedPrice': []}
+    for label, dropdown in widgets_pairs:
+        item_name = label.value.rstrip(':')
+        data['Item'].append(item_name)
+        data['Matched_Item_ReportedPrice'].append(dropdown.value)
+
+    # Create DataFrame
+    selected_df = pd.DataFrame(data)
+    
+    # Save the DataFrame to CSV
+    try:
+        selected_df.to_csv('selected_prices.csv', index=False)
+        print("Selections saved to 'selected_prices.csv'")
+    except Exception as e:
+        print(f"Failed to save CSV: {e}")
+
+# Button for saving the selections
+save_button = widgets.Button(description="Save Selections")
+save_button.on_click(save_selections)  # Link the button click to the save function
