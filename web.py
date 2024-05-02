@@ -25,7 +25,7 @@ if uploaded_file is not None:
         df = pd.read_csv(uploaded_file)
     else:
         df = pd.read_excel(uploaded_file)
-
+    df.set_index('Item', inplace=True)
     st.write('Pivot Table:')
     st.dataframe(df)
 
